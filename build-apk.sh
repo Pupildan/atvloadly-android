@@ -67,17 +67,22 @@ adds = [
     (os.path.join(work, "lib/arm64-v8a/libatvloadly.so"), "lib/arm64-v8a/libatvloadly.so"),
     (os.path.join(work, "lib/arm64-v8a/libplumesign.so"), "lib/arm64-v8a/libplumesign.so"),
 ]
+# On Android 11+ with targetSdk >= 30, resources.arsc MUST be stored
+# uncompressed and 4-byte aligned, or the installer rejects the APK
+# ("App not installed"). Keep it STORED; native .so also STORED.
+UNCOMPRESSED = {"resources.arsc"}
 with zipfile.ZipFile(apk) as z:
     items = [(i.filename, z.read(i.filename)) for i in z.infolist() if i.filename != "classes.dex"]
 with zipfile.ZipFile(apk, "w") as z:
-    # resources/manifest/dex compressed; native libs stored uncompressed
     for name, data in items:
-        z.writestr(name, data, compress_type=zipfile.ZIP_DEFLATED)
+        ct = zipfile.ZIP_STORED if (name in UNCOMPRESSED or name.endswith(".so")) else zipfile.ZIP_DEFLATED
+        z.writestr(name, data, compress_type=ct)
     for path, arc in adds:
         ct = zipfile.ZIP_STORED if arc.endswith(".so") else zipfile.ZIP_DEFLATED
         z.write(path, arc, compress_type=ct)
 print("  bundled", ", ".join(a for _, a in adds))
 PY
+# -p: page-align uncompressed native libs; resources.arsc aligned by 4-byte zipalign
 zipalign -f -p 4 "$WORK/app-withdex.apk" "$WORK/app-aligned.apk"
 
 echo "[6/6] sign"
