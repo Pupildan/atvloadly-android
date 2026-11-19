@@ -2,12 +2,15 @@ package com.bitxeno.atvloadly;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
 import android.view.Window;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -32,11 +35,16 @@ import java.io.OutputStreamWriter;
 public class MainActivity extends Activity {
     private static final int PORT = 9000;
     private static final String URL = "http://127.0.0.1:" + PORT + "/";
+    private static final int FILE_CHOOSER_REQUEST = 1001;
 
     private Process serverProcess;
     private WifiManager.MulticastLock multicastLock;
     private WebView webView;
     private View loadingView;
+    // Pending callback from the WebView's <input type="file"> so we can hand the
+    // picked IPA back to the page. Android WebView needs onShowFileChooser wired
+    // up or the file button silently does nothing.
+    private ValueCallback<Uri[]> fileUploadCallback;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
@@ -83,7 +91,29 @@ public class MainActivity extends Activity {
                 hideLoading();
             }
         });
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view,
+                                             ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
+                // Cancel any previous picker still pending.
+                if (fileUploadCallback != null) {
+                    fileUploadCallback.onReceiveValue(null);
+                }
+                fileUploadCallback = callback;
+                try {
+                    Intent intent = params.createIntent();
+                    // IPAs are zip-based; accept any file so the picker isn't
+                    // over-restrictive, the page filters by extension itself.
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    startActivityForResult(intent, FILE_CHOOSER_REQUEST);
+                } catch (Exception e) {
+                    fileUploadCallback = null;
+                    return false;
+                }
+                return true;
+            }
+        });
 
         root.addView(webView, new android.widget.FrameLayout.LayoutParams(
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
@@ -422,6 +452,22 @@ public class MainActivity extends Activity {
             webView.goBack();
         } else {
             super.onBackPressed();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == FILE_CHOOSER_REQUEST) {
+            ValueCallback<Uri[]> callback = fileUploadCallback;
+            fileUploadCallback = null;
+            if (callback == null) return;
+            Uri[] results = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                results = new Uri[]{ data.getData() };
+            }
+            callback.onReceiveValue(results);
+        } else {
+            super.onActivityResult(requestCode, resultCode, data);
         }
     }
 
