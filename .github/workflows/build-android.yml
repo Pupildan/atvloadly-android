@@ -102,13 +102,13 @@ jobs:
           git clone --depth 1 --branch "$PLUME_VERSION" \
             https://github.com/bitxeno/PlumeImpactor.git engine
           cd engine
-          # cargo-ndk wires the NDK clang into CC/linker for the target.
+          # cargo-ndk wires the NDK clang into CC/linker for the target
+          # automatically; do NOT override RUSTFLAGS with a bare linker name
+          # (it wouldn't be on PATH and breaks the final link step).
           cargo ndk -t aarch64-linux-android -o out build --release --bin plumesign
           find out -type f -name 'plumesign*' -exec ls -la {} \;
           cp out/aarch64-linux-android/plumesign "$GITHUB_WORKSPACE/plumesign-android"
           file "$GITHUB_WORKSPACE/plumesign-android"
-        env:
-          RUSTFLAGS: "-C linker=aarch64-linux-android-clang"
 
       - name: Package APK
         run: |
