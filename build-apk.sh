@@ -36,7 +36,7 @@ aapt2 link -o "$WORK/app-unsigned.apk" \
   -I "$AJ" \
   --manifest "$APP/AndroidManifest.xml" \
   --min-sdk-version 24 --target-sdk-version 34 \
-  --version-code 104 --version-name 1.0.4 \
+  --version-code 105 --version-name 1.0.5 \
   --java "$WORK/gen" --auto-add-overlay "$WORK/res.zip"
 
 echo "[2/6] javac"
