@@ -101,6 +101,10 @@ jobs:
         run: |
           git clone --depth 1 --branch "$PLUME_VERSION" \
             https://github.com/bitxeno/PlumeImpactor.git engine
+          # Android TLS fix: the default rustls-platform-verifier needs a JVM/JNI
+          # context a standalone binary lacks, so swap in webpki-roots. See
+          # patches/apply-engine-patch.sh for the full explanation.
+          bash patches/apply-engine-patch.sh engine
           cd engine
           # cargo-ndk wires the NDK clang into CC/linker for the target
           # automatically. Do NOT pass `-o`: that makes cargo-ndk expect a
