@@ -69,6 +69,16 @@ jobs:
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$SDK/ndk/26.3.11579264" >> "$GITHUB_ENV"
           echo "NDK_HOME=$SDK/ndk/26.3.11579264" >> "$GITHUB_ENV"
+          # Override the runner's preset NDK (27.x) so CMake-based native builds
+          # (aws-lc-sys/BoringSSL) use the SAME NDK as cargo-ndk (26.3).
+          echo "ANDROID_NDK_ROOT=$SDK/ndk/26.3.11579264" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK=$SDK/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: Install native build tools (cmake backend needs make/ninja)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ninja-build make cmake nasm
+          echo "CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
 
       - name: Clone atvloadly source
         run: git clone --depth 1 https://github.com/bitxeno/atvloadly.git atvloadly
