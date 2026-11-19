@@ -155,12 +155,26 @@ public class MainActivity extends Activity {
                     if (!work.exists()) work.mkdirs();
                     seedSettings(work);
 
+                    // The sideload engine ships as libplumesign.so inside
+                    // nativeLibraryDir (not on $PATH, and with a lib prefix/so
+                    // suffix). The Go backend execs it by the name "plumesign",
+                    // so expose it under that name in a dir we put on $PATH.
+                    File binDir = new File(home, "bin");
+                    if (!binDir.exists()) binDir.mkdirs();
+                    installEngine(binDir, "libplumesign.so", "plumesign");
+
                     ProcessBuilder pb = new ProcessBuilder(
                             bin.getAbsolutePath(), "server",
                             "--config", cfg.getAbsolutePath(),
                             "--port", String.valueOf(PORT));
                     pb.environment().put("HOME", home.getAbsolutePath());
                     pb.environment().put("TMPDIR", home.getAbsolutePath());
+                    // Prepend our bin dir (holding the plumesign engine) to PATH
+                    // so the backend's exec("plumesign") resolves it.
+                    String existingPath = pb.environment().get("PATH");
+                    pb.environment().put("PATH",
+                            binDir.getAbsolutePath() + ":"
+                                    + (existingPath != null ? existingPath : "/system/bin"));
                     pb.redirectErrorStream(true);
                     serverProcess = pb.start();
 
@@ -179,6 +193,31 @@ public class MainActivity extends Activity {
                 }
             }
         }).start();
+    }
+
+    /**
+     * Copy a native binary shipped as a "lib" (e.g. libplumesign.so) out of
+     * nativeLibraryDir into binDir under its plain executable name, and mark it
+     * executable. Returns the destination File.
+     */
+    private File installEngine(File binDir, String libName, String exeName) throws Exception {
+        File src = new File(getApplicationInfo().nativeLibraryDir, libName);
+        if (!src.exists()) {
+            // Fallback path used by some devices/Android versions.
+            src = new File("/data/data/" + getPackageName() + "/lib/" + libName);
+        }
+        File dst = new File(binDir, exeName);
+        // Copy (not symlink) so the executable is a regular writable file.
+        java.io.FileInputStream in = new java.io.FileInputStream(src);
+        java.io.FileOutputStream out = new java.io.FileOutputStream(dst);
+        byte[] buf = new byte[65536];
+        int n;
+        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        in.close();
+        out.close();
+        dst.setExecutable(true, false);
+        dst.setReadable(true, false);
+        return dst;
     }
 
     private File writeConfig(File home) throws Exception {
