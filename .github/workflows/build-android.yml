@@ -1,0 +1,115 @@
+name: Build Android APK (full sideload engine)
+
+# Builds a fully-functional atvloadly Android APK on an x86_64 runner:
+#   - cross-compiles the plumesign sideload engine (Rust) for aarch64-linux-android
+#   - cross-compiles the Go backend (embeds the Vue frontend) for android/arm64
+#   - packages a signed APK
+#
+# Must run on x86_64: the Android NDK is only shipped as x86_64 Linux binaries,
+# and the engine's `ring` dependency compiles C/asm through it.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['android-v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      PLUME_VERSION: v2.7.1-patch.11
+      NDK_VERSION: 26.3.11579264
+
+    steps:
+      - name: Checkout this repo (Android shell + build scripts)
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android/sdk/ndk/* || true
+          df -h /
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Go 1.25
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Rust + Android target + cargo-ndk
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk --locked
+
+      - name: Android SDK / NDK
+        run: |
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "build-tools;34.0.0" "platforms;android-34" "platform-tools" "ndk;$NDK_VERSION" >/dev/null
+          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "NDK_HOME=/usr/local/lib/android/sdk/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Clone atvloadly source
+        run: git clone --depth 1 https://github.com/bitxeno/atvloadly.git atvloadly
+
+      - name: Apply Android patch (lzfse shim, no cgo)
+        run: bash patches/apply-android-patch.sh atvloadly
+
+      - name: Build Vue frontend
+        working-directory: atvloadly/web/static
+        run: npm ci && npm run build
+
+      - name: Cross-compile Go backend (android/arm64)
+        working-directory: atvloadly
+        run: |
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 \
+            go build -ldflags="-s -w" -o "$GITHUB_WORKSPACE/libatvloadly.so" main.go
+          file "$GITHUB_WORKSPACE/libatvloadly.so"
+
+      - name: Cross-compile plumesign engine (aarch64-linux-android)
+        run: |
+          git clone --depth 1 --branch "$PLUME_VERSION" \
+            https://github.com/bitxeno/PlumeImpactor.git engine
+          cd engine
+          # cargo-ndk wires the NDK clang into CC/linker for the target.
+          cargo ndk -t aarch64-linux-android -o out build --release --bin plumesign
+          find out -type f -name 'plumesign*' -exec ls -la {} \;
+          cp out/aarch64-linux-android/plumesign "$GITHUB_WORKSPACE/plumesign-android"
+          file "$GITHUB_WORKSPACE/plumesign-android"
+        env:
+          RUSTFLAGS: "-C linker=aarch64-linux-android-clang"
+
+      - name: Package APK
+        run: |
+          bash build-apk.sh
+        env:
+          GO_BIN: ${{ github.workspace }}/libatvloadly.so
+          ENGINE_BIN: ${{ github.workspace }}/plumesign-android
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: atvloadly-android-full
+          path: dist/atvloadly-android-arm64.apk
+          if-no-files-found: error
+
+      - name: Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/atvloadly-android-arm64.apk

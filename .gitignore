@@ -1,0 +1,6 @@
+build/
+dist/
+keystore/
+libs/arm64-v8a/*.so
+*.idsig
+__pycache__/
