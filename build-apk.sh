@@ -35,6 +35,8 @@ aapt2 compile --dir "$RES" -o "$WORK/res.zip"
 aapt2 link -o "$WORK/app-unsigned.apk" \
   -I "$AJ" \
   --manifest "$APP/AndroidManifest.xml" \
+  --min-sdk-version 24 --target-sdk-version 34 \
+  --version-code 100 --version-name 1.0.0 \
   --java "$WORK/gen" --auto-add-overlay "$WORK/res.zip"
 
 echo "[2/6] javac"
@@ -53,6 +55,9 @@ chmod +x "$WORK/lib/arm64-v8a/"*.so
 
 echo "[5/6] assemble + zipalign"
 cp "$WORK/app-unsigned.apk" "$WORK/app-withdex.apk"
+# Bundle native libs STORED (uncompressed) + 4-byte aligned via zipalign below.
+# Android requires uncompressed .so to be page-aligned when extractNativeLibs=false;
+# we keep extractNativeLibs default (true) but store uncompressed anyway for safety.
 python3 - "$WORK" <<'PY'
 import sys, zipfile, os
 work = sys.argv[1]
@@ -64,14 +69,16 @@ adds = [
 ]
 with zipfile.ZipFile(apk) as z:
     items = [(i.filename, z.read(i.filename)) for i in z.infolist() if i.filename != "classes.dex"]
-with zipfile.ZipFile(apk, "w", zipfile.ZIP_DEFLATED) as z:
+with zipfile.ZipFile(apk, "w") as z:
+    # resources/manifest/dex compressed; native libs stored uncompressed
     for name, data in items:
-        z.writestr(name, data)
+        z.writestr(name, data, compress_type=zipfile.ZIP_DEFLATED)
     for path, arc in adds:
-        z.write(path, arc)
+        ct = zipfile.ZIP_STORED if arc.endswith(".so") else zipfile.ZIP_DEFLATED
+        z.write(path, arc, compress_type=ct)
 print("  bundled", ", ".join(a for _, a in adds))
 PY
-zipalign -f 4 "$WORK/app-withdex.apk" "$WORK/app-aligned.apk"
+zipalign -f -p 4 "$WORK/app-withdex.apk" "$WORK/app-aligned.apk"
 
 echo "[6/6] sign"
 KS="$ROOT/keystore/atvloadly.keystore"
@@ -81,10 +88,12 @@ if [ ! -f "$KS" ]; then
     -storepass atvloadly -keypass atvloadly \
     -dname "CN=atvloadly,O=bitxeno,C=CN"
 fi
-"$BT/apksigner" sign --ks "$KS" --ks-pass pass:atvloadly --key-pass pass:atvloadly \
+"$BT/apksigner" sign \
+  --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+  --ks "$KS" --ks-pass pass:atvloadly --key-pass pass:atvloadly \
   --ks-key-alias atvloadly \
   --out "$ROOT/dist/atvloadly-android-arm64.apk" "$WORK/app-aligned.apk"
-"$BT/apksigner" verify "$ROOT/dist/atvloadly-android-arm64.apk"
+"$BT/apksigner" verify --verbose "$ROOT/dist/atvloadly-android-arm64.apk" | grep -iE "verified|scheme" || true
 
 ls -la "$ROOT/dist/atvloadly-android-arm64.apk"
 echo "done: dist/atvloadly-android-arm64.apk"

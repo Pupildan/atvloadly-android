@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.bitxeno.atvloadly">
+    package="com.bitxeno.atvloadly"
+    android:versionCode="100"
+    android:versionName="1.0.0">
 
     <!-- Android 14+ refuses to install apps with targetSdkVersion < 23,
          so these MUST be declared explicitly. -->
