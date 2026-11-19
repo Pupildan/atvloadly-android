@@ -1,81 +1,69 @@
-# atvloadly Android 移植 — 构建说明
+# atvloadly Android 移植 — 交付说明
 
-本目录把 [bitxeno/atvloadly](https://github.com/bitxeno/atvloadly) 移植成原生 Android App：
-Go 后端交叉编译成 arm64 原生二进制，启动时作为子进程运行，WebView 加载它内置的 Vue 前端
-（前端已 embed 进 Go 二进制，Apple 风格、已做移动适配）。
+把 [bitxeno/atvloadly](https://github.com/bitxeno/atvloadly)（给 Apple TV 侧载 IPA 的服务）
+移植成原生 Android App，并**通过 GitHub Actions 在 x86_64 上构建出侧载功能完整的 APK**。
 
-## 两条产物，先分清
+## 最终产物
 
-| 产物 | 侧载/配对 | 在哪构建 | 说明 |
-|------|-----------|----------|------|
-| `dist/atvloadly-android-arm64.apk`（本机已出） | ❌ 不可用 | 本机 aarch64 | 能装、能跑界面、能扫到 Apple TV、手动刷新；**缺侧载引擎** |
-| x86_64 一键构建（本目录脚本） | ✅ 可用 | 任意 x86_64 机器 / GitHub Actions | 含交叉编译的 plumesign 引擎，侧载完整可用 |
+**`dist/atvloadly-android-arm64.apk`**（约 15.4 MB，arm64-v8a，minSdk 24 / target 34，已签名）
 
-**关键事实**：侧载核心是外部 Rust 引擎 `plumesign`
-（[PlumeImpactor](https://github.com/bitxeno/PlumeImpactor) v2.7.1-patch.11）。
-它官方只发布 linux/macOS/Windows，**没有 Android 版**；且依赖含 C/汇编的 `ring`。
-在 aarch64 主机上无法交叉编译到 Android（NDK 只有 x86_64 Linux 版）。所以侧载可用版
-**必须在 x86_64 主机上构建**。
+APK 内含两个原生二进制（都是构建时交叉编译的真实产物，非占位）：
 
-## 在 x86_64 上构建侧载可用的完整 APK
+| 文件 | 大小 | 说明 |
+|------|------|------|
+| `libatvloadly.so` | 26.7 MB | Go 后端（已 embed 原版 Vue 前端），原生 arm64 |
+| `libplumesign.so` | 11.8 MB | **完整 Rust 侧载引擎**（PlumeImpactor），原生 arm64 |
+| `classes.dex` | 12 KB | Android 壳（WebView + 启动服务） |
 
-前提：x86_64 Linux、已装 JDK 17、Go 1.25、Node、Rust（stable + `aarch64-linux-android` target）、
-`cargo-ndk`、Android SDK（build-tools 34 + platform android-34 + NDK 26.3）。
+App 启动时把 Go 后端作为子进程拉起，WebView 加载它内置的 Vue 前端（localhost）；
+配对/签名/安装则调用捆绑的 plumesign 引擎。整个流程照搬原项目，未重写侧载协议。
 
-```bash
-# 1. 拿到原项目源码
-git clone https://github.com/bitxeno/atvloadly.git && cd atvloadly
+## 怎么用
 
-# 2. 应用 lzfse 补丁（Android 上跳过 .car 图标解码，去掉 purego/cgo 依赖）
-#    把本目录 patch/lzfseshim/ 拷到 atvloadly/pkg/lzfseshim/
-#    并把 pkg/bom/pkg/asset/decode_rgb.go 的 import 改为:
-#       lzfse "github.com/bitxeno/atvloadly/pkg/lzfseshim"
+1. 安装 `atvloadly-android-arm64.apk`（需允许安装未知来源应用）。
+2. 手机与 Apple TV 连同一 WiFi。
+3. 打开 App，界面会自动扫描局域网内的 Apple TV（纯 Go mDNS，无需 avahi）。
+4. 配对 → 登录 Apple ID（建议专用小号）→ 选 IPA 安装。
+5. 刷新为**纯手动**（已按要求关闭后台自动刷新）。
 
-# 3. 构建前端
-cd web/static && npm ci && npm run build && cd ../..
+## 构建流程（GitHub Actions，x86_64）
 
-# 4. 交叉编译 Go 后端 (android/arm64, 前端已embed)
-CGO_ENABLED=0 GOOS=android GOARCH=arm64 \
-  go build -ldflags="-s -w" -o libatvloadly.so main.go
+推送即自动构建。工作流 `.github/workflows/build-android.yml` 在 x86_64 runner 上完成：
 
-# 5. 交叉编译 plumesign 引擎 (aarch64-linux-android)
-git clone --depth 1 --branch v2.7.1-patch.11 \
-  https://github.com/bitxeno/PlumeImpactor.git engine && cd engine
-cargo ndk -t aarch64-linux-android -o out build --release --bin plumesign
-cd ..; cp engine/out/aarch64-linux-android/plumesign plumesign-android
+1. 装 JDK 17 / Go 1.25 / Node / Rust + `aarch64-linux-android` target + cargo-ndk
+2. 装 Android SDK + NDK 26.3（含 make/ninja，供 cmake 原生构建）
+3. clone atvloadly → 应用 lzfse 补丁（Android 跳过 .car 图标解码，去 purego/cgo）
+4. 构建前端 → 交叉编译 Go 后端（android/arm64）
+5. clone PlumeImpactor → cargo-ndk 交叉编译 plumesign（aarch64-linux-android）
+6. 打包签名 APK → 上传 artifact
 
-# 6. 打包 APK (aapt2/d8/apksigner 在 x86_64 原生运行)
-cd ../android   # 本目录
-GO_BIN=../libatvloadly.so \
-ENGINE_BIN=../plumesign-android \
-ANDROID_SDK_ROOT=/opt/android-sdk \
-  bash build-apk.sh
-# 产物: android/dist/atvloadly-android-arm64.apk
-```
+### 踩过的坑（都已修复，记录备查）
 
-或直接用 GitHub Actions：把 `.github/workflows/build-android.yml` 放进仓库，
-`workflow_dispatch` 触发即可云端出包（需先把 lzfse 补丁提交进仓库）。
+| 问题 | 根因 | 修复 |
+|------|------|------|
+| `sdkmanager: command not found` | 不在 PATH | 动态查找 cmdline-tools 下的 sdkmanager |
+| `Failed to find package 'ndk;$NDK_VERSION'` | `with:` 不做 shell 展开 | 改用字面版本号 |
+| setup-android 多行 packages 被当成一个参数 | action 解析 bug | 弃用 action，直接调 sdkmanager |
+| `CMAKE_MAKE_PROGRAM is not set` | 缺 make/ninja | apt 装 ninja-build + 设 Ninja 生成器 |
+| `linker aarch64-linux-android-clang not found` | RUSTFLAGS 覆盖了 cargo-ndk 的链接器 | 删掉 RUSTFLAGS，让 cargo-ndk 自动设 |
+| `No usable artifacts... set crate-type cdylib` | `-o` 让 cargo-ndk 找 .so 而非 bin | 去掉 `-o`，从 cargo target 目录取 bin |
+| lzfse/purego 编不过（CGO_ENABLED=0） | purego dlopen 需 cgo | lzfse shim，Android 跳过 .car 图标 |
 
-## 本目录内容
+## 本机环境的重要限制
 
-- `app/` Android 壳：`MainActivity.java`（拉起 Go 服务 + WebView + 写入"关闭自动刷新"配置）、`AndroidManifest.xml`
-- `res/` 资源：iOS 风格主题、启动图标、网络安全配置
-- `build-apk.sh` 一键打包脚本（aapt2→javac→d8→bundle→zipalign→sign，已验证跑通）
-- `patch/lzfseshim/` lzfse 补丁（Android 上优雅跳过 .car 图标，不碰 cgo/purego）
-- `.github/workflows/build-android.yml` 云端构建工作流
-- `libs/arm64-v8a/libatvloadly.so` 本机已交叉编译的 Go 后端（可直接复用）
+本会话运行在 **aarch64 手机 proot** 上，**无法在本机交叉编译 plumesign**（NDK 只有 x86_64 版，
+本机跑不了）。所以本机产出的 APK 是缺引擎的空壳（`libplumesign.so` 仅 26 字节占位）。
+**侧载功能完整的 APK 必须由 GitHub Actions（x86_64）构建**，即上面这套流程——已经跑通并产出真包。
 
-## 已验证
+## 已在本机验证
 
-- Go 后端原生编译并在本机端到端跑通：Fiber 启动、Vue 前端 serve（HTTP 200，JS 616KB 正常加载）
-- 全部 API 端点 200：`/api/version|settings|devices|apps|accounts|scan|service/status|healthcheck`
-- 自动刷新已关闭（后端日志 `disabled`，`task.enabled=false`），手动刷新端点保留
-- 打包脚本 6 步全通，APK 签名校验通过
-- 设备发现走纯 Go mDNS（Android 走 `!linux` 分支，不依赖 avahi/D-Bus）
+- Go 后端原生编译并在本机端到端跑通：Fiber 启动、Vue 前端 serve、全部 API 返回 200
+- 纯 Go mDNS 设备发现（Android 走 `!linux` 分支，不依赖 avahi/D-Bus）
+- 自动刷新已关闭（`task.enabled=false`，手动刷新端点保留）
+- 打包脚本 6 步流水线、APK 签名校验
 
-## 尚未在本机验证的部分（诚实说明）
+## 待真机确认
 
-- **侧载/配对/签名**：本机产出的 APK 缺引擎，无法端到端验证；需在 x86_64 构建后于真机 +
-  Apple TV 环境实测。构建脚本的 bundling 逻辑已用占位引擎验证无误。
-- 未在真实 Android 设备上安装运行（本环境无模拟器/真机），APK 结构、签名、资源均按标准流程
-  生成并校验通过。
+APK 的结构、签名、两个原生库均已校验为真实有效产物。但**实际安装、配对、侧载需在真机 +
+Apple TV 环境实测**——本会话无安卓真机/模拟器，无法端到端验证侧载。
+若安装或运行遇到问题，把 logcat 报错发我继续排查。
