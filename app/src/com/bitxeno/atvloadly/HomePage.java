@@ -48,12 +48,15 @@ public class HomePage extends Page implements Nav.Panel {
 
     @Override
     protected View onBuild() {
-        LinearLayout col = ui.column();
-        col.setBackgroundColor(ui.color(Ui.CARD_BG));
+        LinearLayout wrap = ui.column();
+        wrap.setBackgroundColor(ui.color(Ui.CARD_BG));
+
+        LinearLayout.LayoutParams gp = ui.match();
+        gp.topMargin = ui.dp(4);
 
         LinearLayout group = ui.group();
         group.setPadding(0, 0, 0, 0);
-        col.addView(group, ui.match());
+        wrap.addView(group, gp);
 
         addRow(group, "设", "设备", "扫描并配对 Apple TV", new Runnable() {
             public void run() {
@@ -78,12 +81,6 @@ public class HomePage extends Page implements Nav.Panel {
                 host.openAccounts();
             }
         }, true);
-
-        LinearLayout.LayoutParams gp = ui.match();
-        gp.topMargin = ui.dp(4);
-        LinearLayout wrap = ui.column();
-        wrap.setBackgroundColor(ui.color(Ui.CARD_BG));
-        wrap.addView(group, gp);
 
         android.widget.TextView foot = ui.footnote("本地服务运行在 127.0.0.1:" + Backend.PORT);
         LinearLayout.LayoutParams fp = ui.match();
