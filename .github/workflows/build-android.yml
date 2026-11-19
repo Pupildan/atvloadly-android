@@ -103,12 +103,14 @@ jobs:
             https://github.com/bitxeno/PlumeImpactor.git engine
           cd engine
           # cargo-ndk wires the NDK clang into CC/linker for the target
-          # automatically; do NOT override RUSTFLAGS with a bare linker name
-          # (it wouldn't be on PATH and breaks the final link step).
-          cargo ndk -t aarch64-linux-android -o out build --release --bin plumesign
-          find out -type f -name 'plumesign*' -exec ls -la {} \;
-          cp out/aarch64-linux-android/plumesign "$GITHUB_WORKSPACE/plumesign-android"
-          file "$GITHUB_WORKSPACE/plumesign-android"
+          # automatically. Do NOT pass `-o`: that makes cargo-ndk expect a
+          # cdylib (.so) artifact and it errors on a --bin target. The binary
+          # lands in the standard cargo target dir instead.
+          cargo ndk -t aarch64-linux-android build --release --bin plumesign
+          BIN=target/aarch64-linux-android/release/plumesign
+          ls -la "$BIN"
+          file "$BIN"
+          cp "$BIN" "$GITHUB_WORKSPACE/plumesign-android"
 
       - name: Package APK
         run: |
