@@ -36,12 +36,12 @@ aapt2 link -o "$WORK/app-unsigned.apk" \
   -I "$AJ" \
   --manifest "$APP/AndroidManifest.xml" \
   --min-sdk-version 24 --target-sdk-version 34 \
-  --version-code 102 --version-name 1.0.2 \
+  --version-code 103 --version-name 1.0.3 \
   --java "$WORK/gen" --auto-add-overlay "$WORK/res.zip"
 
 echo "[2/6] javac"
 javac --release 11 -cp "$AJ" -d "$WORK/classes" \
-  "$APP/MainActivity.java" \
+  "$APP"/*.java \
   "$WORK/gen/com/bitxeno/atvloadly/R.java"
 
 echo "[3/6] d8 (dex)"
