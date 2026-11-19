@@ -28,4 +28,53 @@ fi
 # Point decode_rgb.go at the shim instead of upstream lzfse-go.
 sed -i 's#lzfse "github.com/bitxeno/lzfse-go"#lzfse "github.com/bitxeno/atvloadly/pkg/lzfseshim"#' "$DECODE"
 
+# Patch the exec layer so the backend can find the bundled plumesign engine on
+# Android. The engine lives in the exec-allowed nativeLibraryDir as
+# libplumesign.so, but the backend execs the bare name "plumesign" (PATH
+# lookup), which fails on Android 10+ where app-writable dirs are W^X-blocked.
+# resolveBinary() lets the launcher pass the real engine path via PLUMESIGN_BIN.
+COMMAND_GO="$ATV_DIR/internal/exec/command.go"
+if [ ! -f "$COMMAND_GO" ]; then
+  echo "error: $COMMAND_GO not found" >&2
+  exit 1
+fi
+python3 - "$COMMAND_GO" <<'PY'
+import sys, re
+path = sys.argv[1]
+src = open(path).read()
+if "resolveBinary" in src:
+    print("command.go already patched")
+    sys.exit(0)
+# Route the command name through resolveBinary().
+src = src.replace(
+    "func Command(name string, args ...string) *Cmd {\n\treturn &Cmd{\n\t\tName:    name,",
+    "func Command(name string, args ...string) *Cmd {\n\treturn &Cmd{\n\t\tName:    resolveBinary(name),",
+    1,
+)
+helper = '''
+// resolveBinary maps a bare command name to an absolute path when the
+// corresponding <NAME>_BIN environment variable is set. This lets packaged
+// builds (Android, where the binary must live in the exec-allowed
+// nativeLibraryDir under a lib-prefixed name) point the launcher at the real
+// engine location without changing any call site. Unset => use PATH lookup.
+func resolveBinary(name string) string {
+\tif name != "plumesign" {
+\t\treturn name
+\t}
+\tif p := os.Getenv("PLUMESIGN_BIN"); p != "" {
+\t\treturn p
+\t}
+\treturn name
+}
+'''
+# Insert the helper right after the Command() constructor's closing brace.
+m = re.search(r"(func Command\(name string, args \.\.\.string\) \*Cmd \{.*?\n\}\n)", src, re.S)
+if not m:
+    print("error: could not locate Command() in command.go", file=sys.stderr)
+    sys.exit(1)
+src = src[:m.end()] + helper + src[m.end():]
+open(path, "w").write(src)
+print("patch applied: internal/exec/command.go resolveBinary installed")
+PY
+
 echo "patch applied: pkg/lzfseshim installed, decode_rgb.go import rewritten"
