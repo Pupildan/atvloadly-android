@@ -55,13 +55,9 @@ jobs:
           cargo install cargo-ndk --locked
 
       - name: Android SDK / NDK
-        run: |
-          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "build-tools;34.0.0" "platforms;android-34" "platform-tools" "ndk;$NDK_VERSION" >/dev/null
-          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
-          echo "NDK_HOME=/usr/local/lib/android/sdk/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'build-tools;34.0.0 platforms;android-34 platform-tools ndk;$NDK_VERSION'
 
       - name: Clone atvloadly source
         run: git clone --depth 1 https://github.com/bitxeno/atvloadly.git atvloadly
