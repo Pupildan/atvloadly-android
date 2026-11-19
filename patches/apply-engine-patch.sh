@@ -73,11 +73,13 @@ pub fn client() -> Result<reqwest::Client, Error> {
     // preconfigured rustls config so platform-verifier is never used.
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    roots.add(rustls::pki_types::CertificateDer::from(APPLE_ROOT.to_vec()))?;
+    roots.add(rustls::pki_types::CertificateDer::from(APPLE_ROOT.to_vec()))
+        .map_err(|e| Error::Certificate(e.to_string()))?;
 
-    let provider = std::sync::Arc::new(rustls::ring::default_provider());
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
     let config = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()?
+        .with_safe_default_protocol_versions()
+        .map_err(|e| Error::Certificate(e.to_string()))?
         .with_root_certificates(roots)
         .with_no_client_auth();
 
