@@ -155,13 +155,12 @@ public class MainActivity extends Activity {
                     if (!work.exists()) work.mkdirs();
                     seedSettings(work);
 
-                    // The sideload engine ships as libplumesign.so inside
-                    // nativeLibraryDir (not on $PATH, and with a lib prefix/so
-                    // suffix). The Go backend execs it by the name "plumesign",
-                    // so expose it under that name in a dir we put on $PATH.
-                    File binDir = new File(home, "bin");
-                    if (!binDir.exists()) binDir.mkdirs();
-                    installEngine(binDir, "libplumesign.so", "plumesign");
+                    // Android 10+ (W^X) forbids exec from app-writable dirs
+                    // (filesDir), so we cannot copy the engine there. The engine
+                    // stays in nativeLibraryDir (exec-allowed) as
+                    // libplumesign.so. The backend resolves the bare name
+                    // "plumesign" to PLUMESIGN_BIN when set, so point it there.
+                    File engine = findNative("libplumesign.so");
 
                     ProcessBuilder pb = new ProcessBuilder(
                             bin.getAbsolutePath(), "server",
@@ -169,12 +168,9 @@ public class MainActivity extends Activity {
                             "--port", String.valueOf(PORT));
                     pb.environment().put("HOME", home.getAbsolutePath());
                     pb.environment().put("TMPDIR", home.getAbsolutePath());
-                    // Prepend our bin dir (holding the plumesign engine) to PATH
-                    // so the backend's exec("plumesign") resolves it.
-                    String existingPath = pb.environment().get("PATH");
-                    pb.environment().put("PATH",
-                            binDir.getAbsolutePath() + ":"
-                                    + (existingPath != null ? existingPath : "/system/bin"));
+                    if (engine != null) {
+                        pb.environment().put("PLUMESIGN_BIN", engine.getAbsolutePath());
+                    }
                     pb.redirectErrorStream(true);
                     serverProcess = pb.start();
 
@@ -196,28 +192,15 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Copy a native binary shipped as a "lib" (e.g. libplumesign.so) out of
-     * nativeLibraryDir into binDir under its plain executable name, and mark it
-     * executable. Returns the destination File.
+     * Locate a native binary shipped as a "lib" (e.g. libplumesign.so) inside
+     * the exec-allowed nativeLibraryDir. Returns null if not found.
      */
-    private File installEngine(File binDir, String libName, String exeName) throws Exception {
-        File src = new File(getApplicationInfo().nativeLibraryDir, libName);
-        if (!src.exists()) {
-            // Fallback path used by some devices/Android versions.
-            src = new File("/data/data/" + getPackageName() + "/lib/" + libName);
-        }
-        File dst = new File(binDir, exeName);
-        // Copy (not symlink) so the executable is a regular writable file.
-        java.io.FileInputStream in = new java.io.FileInputStream(src);
-        java.io.FileOutputStream out = new java.io.FileOutputStream(dst);
-        byte[] buf = new byte[65536];
-        int n;
-        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-        in.close();
-        out.close();
-        dst.setExecutable(true, false);
-        dst.setReadable(true, false);
-        return dst;
+    private File findNative(String libName) {
+        File f = new File(getApplicationInfo().nativeLibraryDir, libName);
+        if (f.exists()) return f;
+        // Fallback path used by some devices/Android versions.
+        File alt = new File("/data/data/" + getPackageName() + "/lib/" + libName);
+        return alt.exists() ? alt : null;
     }
 
     private File writeConfig(File home) throws Exception {
